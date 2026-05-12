@@ -1,6 +1,8 @@
 #include "hal.h"
 #include "button.h"
-#include "adc.h"
+#include "sensor.h"
+#include "buzzer.h"
+#include "ir.h"
 
 static volatile uint32_t s_ticks; // volatile is important!!
 
@@ -9,49 +11,63 @@ void SysTick_Handler(void) {
 }
 
 int main(void) {
-  // uint16_t buzzer = PIN('B', 12);                // buzzer is on PB12
-  uint16_t ir = PIN('B', 13);                    // IR receiver is on PB13
-  uint16_t button = PIN('A', 4);                    // Button is on PA4
-  uint16_t therm = PIN('A', 1);
-  uint16_t light = PIN('A', 2);
-
   systick_init(FREQ / 1000);                  // Tick every 1 ms
   uart_init(USART1, 9600);
 
-  // gpio_set_mode(buzzer, GPIO_CFG_OUT_PP_2MHZ);
-  gpio_set_mode(ir, GPIO_CFG_IN_FLOATING);
+  ir_init();
+  buzzer_init();
+  button_init(s_ticks);
+  sensor_init();
 
-  gpio_set_mode(button, GPIO_CFG_IN_PULL);
-  gpio_write(button, true);   // pull-up
-  button_init(button, s_ticks);
-
-  gpio_set_mode(therm, GPIO_CFG_IN_ANALOG);
-  gpio_set_mode(light, GPIO_CFG_IN_ANALOG);
-
-  adc_init();
-  adc_config_channel(1);
-  adc_config_channel(2);
+  bool alarm_condition = false;
+  bool buzzer_muted = false;
+  uint32_t last_motion_at = 0;
 
   uint32_t timer = 0;
   uint32_t period = 500;
   for (;;) {
-    button_event_t event = button_poll(button, s_ticks);
+    uint32_t now = s_ticks;
+
+    bool motion = ir_motion_detected();
+    if (motion) {
+      last_motion_at = now;
+
+      if (!alarm_condition) {
+        alarm_condition = true;
+        buzzer_muted = false;
+      }
+    }
+    if (alarm_condition && !motion && (now - last_motion_at) >= 5000) {
+      alarm_condition = false;
+      buzzer_muted = false;
+      printf("ALARM CLEARED\r\n");
+    }
+
+    button_event_t event = button_poll(now);
     if (event == BUTTON_SHORT) {
       printf("BUTTON SHORT\r\n");
     } else if (event == BUTTON_LONG) {
-      printf("BUTTON LONG\r\n");
+      if (alarm_condition) {
+        buzzer_muted = true;
+        printf("ALARM ACK: buzzer muted\r\n");
+      }
     }
-    if (timer_expired(&timer, period, s_ticks)) {
-      static bool on;
+    
+    buzzer_set(alarm_condition && !buzzer_muted);
 
-      // gpio_write(buzzer, on);
-      on = !on;
+    if (timer_expired(&timer, period, now)) {
+      sensor_data_t sensor = sensor_read();
 
-      bool ir_state = gpio_read(ir);
-      uint16_t therm_raw = adc_read(1);
-      uint16_t light_raw = adc_read(2);
-      printf("BUZZER=%d IR=%d THERM=%u LIGHT=%u tick=%lu\r\n",
-            on, ir_state, therm_raw, light_raw, s_ticks);
+      printf("MOTION=%d ALARM=%d MUTED=%d THERM_RAW=%u LIGHT_RAW=%u HEAT=%u LIGHT=%u tick=%lu\r\n",
+            motion,
+            alarm_condition,
+            buzzer_muted,
+            sensor.therm_raw,
+            sensor.light_raw,
+            sensor.heat_level,
+            sensor.light_level,
+            now);
+
     }
   }
   return 0;

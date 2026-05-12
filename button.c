@@ -7,8 +7,16 @@ static bool long_reported;      // 長按是否已經回報
 static uint32_t changed_at;     // raw 狀態最後一次變化時間
 static uint32_t pressed_at;     // 穩定按下的開始時間
 
-void button_init(uint16_t button, uint32_t now) {
-    bool raw_pressed = !gpio_read(button);
+enum {
+  BUTTON_PIN = PIN('A', 4),
+  BUTTON_DEBOUNCE_MS = 30,
+  BUTTON_LONG_PRESS_MS = 1000,
+};
+
+void button_init(uint32_t now) {
+    gpio_set_mode(BUTTON_PIN, GPIO_CFG_IN_PULL);
+    gpio_write(BUTTON_PIN, true);   // pull-up
+    bool raw_pressed = !gpio_read(BUTTON_PIN);
 
     last_raw_pressed = raw_pressed;
     stable_pressed = raw_pressed;
@@ -16,21 +24,16 @@ void button_init(uint16_t button, uint32_t now) {
     changed_at = now;
     pressed_at = now; 
 }
-button_event_t button_poll(uint16_t button, uint32_t now) {
-  enum {
-    DEBOUNCE_MS = 30,
-    LONG_PRESS_MS = 1000,
-  };
-
+button_event_t button_poll(uint32_t now) {
   // 1. read raw pressed
-  bool raw_pressed = !gpio_read(button);  // active low
+  bool raw_pressed = !gpio_read(BUTTON_PIN );  // active low
   // 2. detect raw change
   if(raw_pressed != last_raw_pressed){
     last_raw_pressed = raw_pressed;
     changed_at = now;
   }
   // 3. debounce guard
-  if((now - changed_at) < DEBOUNCE_MS){
+  if((now - changed_at) < BUTTON_DEBOUNCE_MS){
     return BUTTON_NONE;
   }
   // 4. stable state change
@@ -41,14 +44,14 @@ button_event_t button_poll(uint16_t button, uint32_t now) {
       long_reported = false;
     } else {
       uint32_t press_duration = now - pressed_at;
-      if(press_duration < 1000){
+      if(!long_reported && press_duration < BUTTON_LONG_PRESS_MS){
         return BUTTON_SHORT;
       }
     }
   }  
 
   // 5. long press check
-  if (stable_pressed && !long_reported && (now - pressed_at) >= 1000) {
+  if (stable_pressed && !long_reported && (now - pressed_at) >= BUTTON_LONG_PRESS_MS) {
     long_reported = true;
     return BUTTON_LONG;
   }
