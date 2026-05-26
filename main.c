@@ -3,6 +3,8 @@
 #include "sensor.h"
 #include "buzzer.h"
 #include "ir.h"
+#include "i2c.h"
+#include "mpu.h"
 
 static volatile uint32_t s_ticks; // volatile is important!!
 
@@ -18,12 +20,14 @@ int main(void) {
   buzzer_init();
   button_init(s_ticks);
   sensor_init();
-
+  soft_i2c_init();
+  bool mpu_ok = mpu_init();
+  printf("MPU init=%d\r\n", mpu_ok);
   bool alarm_condition = false;
   bool buzzer_muted = false;
   uint32_t last_motion_at = 0;
 
-  uint32_t timer = 0;
+  uint32_t timer = s_ticks;
   uint32_t period = 500;
   for (;;) {
     uint32_t now = s_ticks;
@@ -58,7 +62,22 @@ int main(void) {
     if (timer_expired(&timer, period, now)) {
       sensor_data_t sensor = sensor_read();
 
-      printf("MOTION=%d ALARM=%d MUTED=%d THERM_RAW=%u LIGHT_RAW=%u HEAT=%u LIGHT=%u tick=%lu\r\n",
+      // printf("MPU 0x68=%d 0x69=%d\r\n",
+      //  i2c_probe(0x68),
+      //  i2c_probe(0x69));
+
+      uint8_t val;
+
+      mpu_read_reg(0x75, &val);
+      printf("WHO=0x%02X\r\n", val);
+
+      mpu_read_reg(0x6B, &val);
+      printf("PWR_MGMT_1=0x%02X\r\n", val);
+
+      mpu_read_reg(0x1C, &val);
+      printf("ACCEL_CONFIG=0x%02X\r\n", val);
+
+      printf("MOTION=%d ALARM=%d MUTED=%d THERM_RAW=%u LIGHT_RAW=%u HEAT=%u LIGHT=%u tick=%lu\r\n\n",
             motion,
             alarm_condition,
             buzzer_muted,

@@ -21,6 +21,7 @@
 #define GPIO_CFG_IN_PULL 0x8U
 #define GPIO_CFG_OUT_PP_2MHZ 0x2U
 #define GPIO_CFG_AF_PP_2MHZ 0xAU
+#define GPIO_CFG_OUT_OD_2MHZ 0x6U
 
 static inline GPIO_TypeDef *gpio_bank(uint8_t bank) {
   return (GPIO_TypeDef *)(GPIOA_BASE + 0x400UL * bank);
