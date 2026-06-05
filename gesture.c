@@ -15,6 +15,10 @@ static bool s_filter_ready;
 static int32_t s_accel_x_mg;
 static int32_t s_accel_y_mg;
 static int32_t s_accel_z_mg;
+static int32_t s_center_roll_deg;
+static int32_t s_center_pitch_deg;
+static int16_t s_last_raw_roll_deg;
+static int16_t s_last_raw_pitch_deg;
 static gesture_t s_stable_gesture;
 static gesture_t s_candidate_gesture;
 static uint8_t s_candidate_count;
@@ -115,6 +119,22 @@ void gesture_init(void) {
   s_accel_x_mg = 0;
   s_accel_y_mg = 0;
   s_accel_z_mg = 0;
+  s_center_roll_deg = 0;
+  s_center_pitch_deg = 0;
+  s_last_raw_roll_deg = 0;
+  s_last_raw_pitch_deg = 0;
+  s_stable_gesture = GESTURE_CENTER;
+  s_candidate_gesture = GESTURE_CENTER;
+  s_candidate_count = 0;
+}
+
+void gesture_recenter(void) {
+  if (!s_filter_ready) {
+    return;
+  }
+
+  s_center_roll_deg = s_last_raw_roll_deg;
+  s_center_pitch_deg = s_last_raw_pitch_deg;
   s_stable_gesture = GESTURE_CENTER;
   s_candidate_gesture = GESTURE_CENTER;
   s_candidate_count = 0;
@@ -152,8 +172,11 @@ bool gesture_update_angles(const mpu_motion_scaled_t *motion,
   pitch_denominator = sqrtf((ay * ay) + (az * az));
   pitch = atan2f(-ax, pitch_denominator) * (180.0f / 3.1415926f);
 
-  angles->roll_deg = float_to_i16_deg(roll);
-  angles->pitch_deg = float_to_i16_deg(pitch);
+  s_last_raw_roll_deg = float_to_i16_deg(roll);
+  s_last_raw_pitch_deg = float_to_i16_deg(pitch);
+
+  angles->roll_deg = (int16_t)(s_last_raw_roll_deg - s_center_roll_deg);
+  angles->pitch_deg = (int16_t)(s_last_raw_pitch_deg - s_center_pitch_deg);
 
   return true;
 }

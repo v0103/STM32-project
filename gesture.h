@@ -30,6 +30,7 @@ typedef struct {
 } gesture_control_t;
 
 void gesture_init(void);
+void gesture_recenter(void);
 bool gesture_update_angles(const mpu_motion_scaled_t *motion,
                            gesture_angles_t *angles);
 gesture_t gesture_classify(const gesture_angles_t *angles);
