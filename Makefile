@@ -5,8 +5,8 @@ CFLAGS  ?=  -W -Wall -Wextra -Werror -Wundef -Wshadow -Wdouble-promotion \
             -Icmsis_core/CMSIS/Core/Include \
             -Icmsis_f1/Include \
             -mcpu=cortex-m3 -mthumb $(EXTRA_CFLAGS)
-LDFLAGS ?= -Tlink.ld -nostartfiles -nostdlib --specs nano.specs -lc -lgcc -Wl,--gc-sections -Wl,-Map=$@.map
-SOURCES = main.c syscalls.c sysinit.c button.c adc.c sensor.c buzzer.c ir.c i2c.c mpu.c
+LDFLAGS ?= -Tlink.ld -nostartfiles -nostdlib --specs nano.specs -lm -lc -lgcc -Wl,--gc-sections -Wl,-Map=$@.map
+SOURCES = main.c syscalls.c sysinit.c button.c adc.c sensor.c buzzer.c ir.c i2c.c mpu.c gesture.c
 SOURCES += cmsis_f1/Source/Templates/gcc/startup_stm32f103xb.s
 
 ifeq ($(OS),Windows_NT)

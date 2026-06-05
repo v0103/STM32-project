@@ -5,6 +5,7 @@
 #include "ir.h"
 #include "i2c.h"
 #include "mpu.h"
+#include "gesture.h"
 
 static volatile uint32_t s_ticks; // volatile is important!!
 
@@ -12,9 +13,20 @@ void SysTick_Handler(void) {
   s_ticks++;
 }
 
+static void print_control_packet(uint32_t now,
+                                 const gesture_control_t *control) {
+  printf("T=%lu,ROLL=%d,PITCH=%d,ROLL_AXIS=%d,PITCH_AXIS=%d,GESTURE=%s\r\n",
+         now,
+         control->angles.roll_deg,
+         control->angles.pitch_deg,
+         control->roll_axis,
+         control->pitch_axis,
+         gesture_name(control->gesture));
+}
+
 int main(void) {
   systick_init(FREQ / 1000);                  // Tick every 1 ms
-  uart_init(USART1, 9600);
+  uart_init(USART1, 115200);
 
   // ir_init();
   // buzzer_init();
@@ -25,6 +37,7 @@ int main(void) {
   printf("MPU init=%d\r\n", mpu_ok);
   bool gyro_cal_ok = mpu_calibrate_gyro(64);
   printf("GYRO cal=%d\r\n", gyro_cal_ok);
+  gesture_init();
   uint8_t pwr = 0;
   mpu_read_reg(0x6B, &pwr);
   printf("PWR_MGMT_1 after init=0x%02X\r\n", pwr);
@@ -33,7 +46,7 @@ int main(void) {
   // uint32_t last_motion_at = 0;
 
   uint32_t timer = s_ticks;
-  uint32_t period = 500;
+  uint32_t period = 100;
   for (;;) {
     uint32_t now = s_ticks;
 
@@ -73,17 +86,11 @@ int main(void) {
 
       mpu_motion_t motion;
       mpu_motion_scaled_t scaled;
+      gesture_control_t control;
       if (mpu_read_motion_raw(&motion)) {
         (void) mpu_scale_motion(&motion, &scaled);
-        printf("ACCEL x=%d y=%d z=%d TEMP=%d\r\n",
-               motion.accel.x, motion.accel.y, motion.accel.z,
-               motion.temp_raw);
-        printf("GYRO x=%d y=%d z=%d\r\n",
-               motion.gyro.x, motion.gyro.y, motion.gyro.z);
-        printf("ACCEL mg x=%ld y=%ld z=%ld\r\n",
-               scaled.accel.x_mg, scaled.accel.y_mg, scaled.accel.z_mg);
-        printf("GYRO mdps x=%ld y=%ld z=%ld\r\n",
-               scaled.gyro.x_mdps, scaled.gyro.y_mdps, scaled.gyro.z_mdps);
+        (void) gesture_update_control(&scaled, &control);
+        print_control_packet(now, &control);
       } else {
         printf("MPU motion read failed\r\n");
       }
