@@ -6,6 +6,7 @@
 #include "i2c.h"
 #include "mpu.h"
 #include "gesture.h"
+#include "oled.h"
 
 static volatile uint32_t s_ticks; // volatile is important!!
 
@@ -32,7 +33,10 @@ int main(void) {
   // buzzer_init();
   // button_init(s_ticks);
   // sensor_init();
+  button_irq_init();
   soft_i2c_init();
+  bool oled_ok = oled_init();
+  printf("OLED init=%d\r\n", oled_ok);
   bool mpu_ok = mpu_init();
   printf("MPU init=%d\r\n", mpu_ok);
   bool gyro_cal_ok = mpu_calibrate_gyro(64);
@@ -47,6 +51,8 @@ int main(void) {
 
   uint32_t timer = s_ticks;
   uint32_t period = 100;
+  uint32_t oled_timer = s_ticks;
+  uint32_t oled_period = 200;
   for (;;) {
     uint32_t now = s_ticks;
 
@@ -90,6 +96,14 @@ int main(void) {
       if (mpu_read_motion_raw(&motion)) {
         (void) mpu_scale_motion(&motion, &scaled);
         (void) gesture_update_control(&scaled, &control);
+        if (button_take_recenter_request(now)) {
+          gesture_recenter();
+          (void) gesture_update_control(&scaled, &control);
+          printf("RECENTER\r\n");
+        }
+        if (timer_expired(&oled_timer, oled_period, now)) {
+          (void) oled_show_control(&control);
+        }
         print_control_packet(now, &control);
       } else {
         printf("MPU motion read failed\r\n");
