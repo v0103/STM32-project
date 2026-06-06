@@ -4,9 +4,16 @@ CFLAGS  ?=  -W -Wall -Wextra -Werror -Wundef -Wshadow -Wdouble-promotion \
             -I. -Iinclude \
             -Icmsis_core/CMSIS/Core/Include \
             -Icmsis_f1/Include \
+            -IFreeRTOS-Kernel/include \
+            -IFreeRTOS-Kernel/portable/GCC/ARM_CM3 \
             -mcpu=cortex-m3 -mthumb $(EXTRA_CFLAGS)
 LDFLAGS ?= -Tlink.ld -nostartfiles -nostdlib --specs nano.specs -lm -lc -lgcc -Wl,--gc-sections -Wl,-Map=$@.map
 SOURCES = main.c app.c syscalls.c sysinit.c button.c adc.c sensor.c buzzer.c ir.c i2c.c mpu.c gesture.c oled.c control_packet.c
+SOURCES += FreeRTOS-Kernel/tasks.c
+SOURCES += FreeRTOS-Kernel/queue.c
+SOURCES += FreeRTOS-Kernel/list.c
+SOURCES += FreeRTOS-Kernel/portable/GCC/ARM_CM3/port.c
+SOURCES += FreeRTOS-Kernel/portable/MemMang/heap_4.c
 SOURCES += cmsis_f1/Source/Templates/gcc/startup_stm32f103xb.s
 
 ifeq ($(OS),Windows_NT)
