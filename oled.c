@@ -9,7 +9,16 @@ enum {
   OLED_WIDTH = 128,
   OLED_PAGES = 8,
   OLED_TEXT_WIDTH = 6,
+  OLED_GESTURE_CHARS = 14,
+  OLED_ROLL_CHARS = 10,
+  OLED_PITCH_CHARS = 11,
 };
+
+static char s_gesture_line[OLED_GESTURE_CHARS + 1U];
+static char s_roll_line[OLED_ROLL_CHARS + 1U];
+static char s_pitch_line[OLED_PITCH_CHARS + 1U];
+
+static void font5x7(char ch, uint8_t out[5]);
 
 static bool oled_write_command(uint8_t command) {
   uint8_t data[] = {0x00, command};
@@ -51,6 +60,94 @@ static bool oled_set_cursor(uint8_t col, uint8_t page) {
   return oled_write_command((uint8_t)(0xB0U | page)) &&
          oled_write_command((uint8_t)(0x00U | (col & 0x0FU))) &&
          oled_write_command((uint8_t)(0x10U | (col >> 4)));
+}
+
+static void oled_forget_cached_lines(void) {
+  s_gesture_line[0] = '\0';
+  s_roll_line[0] = '\0';
+  s_pitch_line[0] = '\0';
+}
+
+static void make_padded_line(char *line, uint8_t width, const char *text) {
+  uint8_t i = 0;
+
+  while (i < width && text[i] != '\0') {
+    line[i] = text[i];
+    i++;
+  }
+
+  while (i < width) {
+    line[i] = ' ';
+    i++;
+  }
+
+  line[width] = '\0';
+}
+
+static bool line_equals(const char *left, const char *right, uint8_t width) {
+  uint8_t i;
+
+  for (i = 0; i < width; i++) {
+    if (left[i] != right[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static void copy_line(char *dest, const char *src, uint8_t width) {
+  uint8_t i;
+
+  for (i = 0; i <= width; i++) {
+    dest[i] = src[i];
+  }
+}
+
+static bool oled_write_text_width(uint8_t col,
+                                  uint8_t page,
+                                  const char *text,
+                                  uint8_t width) {
+  uint8_t pixels[OLED_GESTURE_CHARS * OLED_TEXT_WIDTH];
+  uint8_t i;
+
+  if (text == NULL ||
+      width > OLED_GESTURE_CHARS ||
+      (uint16_t) col + ((uint16_t) width * OLED_TEXT_WIDTH) > OLED_WIDTH ||
+      !oled_set_cursor(col, page)) {
+    return false;
+  }
+
+  for (i = 0; i < width; i++) {
+    uint8_t glyph[5];
+    uint8_t base = (uint8_t)(i * OLED_TEXT_WIDTH);
+
+    font5x7(text[i], glyph);
+    pixels[base] = glyph[0];
+    pixels[base + 1U] = glyph[1];
+    pixels[base + 2U] = glyph[2];
+    pixels[base + 3U] = glyph[3];
+    pixels[base + 4U] = glyph[4];
+    pixels[base + 5U] = 0;
+  }
+
+  return oled_write_data(pixels, (uint16_t)(width * OLED_TEXT_WIDTH));
+}
+
+static bool oled_write_cached_line(uint8_t page,
+                                   char *cache,
+                                   uint8_t width,
+                                   const char *line) {
+  if (line_equals(cache, line, width)) {
+    return true;
+  }
+
+  if (!oled_write_text_width(0, page, line, width)) {
+    return false;
+  }
+
+  copy_line(cache, line, width);
+  return true;
 }
 
 static void font5x7(char ch, uint8_t out[5]) {
@@ -120,6 +217,7 @@ bool oled_init(void) {
     }
   }
 
+  oled_forget_cached_lines();
   return oled_clear();
 }
 
@@ -165,32 +263,42 @@ bool oled_write_text(uint8_t col, uint8_t page, const char *text) {
 }
 
 bool oled_show_control(const gesture_control_t *control) {
-  char line[22];
+  char text[22];
+  char gesture_line[OLED_GESTURE_CHARS + 1U];
+  char roll_line[OLED_ROLL_CHARS + 1U];
+  char pitch_line[OLED_PITCH_CHARS + 1U];
 
-  if (control == NULL || !oled_clear()) {
+  if (control == NULL) {
     return false;
   }
 
-  if (!oled_write_text(0, 0, "GESTURE")) {
-    return false;
-  }
+  make_padded_line(gesture_line, OLED_GESTURE_CHARS,
+                   gesture_name(control->gesture));
 
-  if (!oled_write_text(0, 1, gesture_name(control->gesture))) {
-    return false;
-  }
+  (void) snprintf(text, sizeof(text), "ROLL:%d", control->roll_axis);
+  make_padded_line(roll_line, OLED_ROLL_CHARS, text);
 
-  (void) snprintf(line, sizeof(line), "ROLL=%d", control->angles.roll_deg);
-  if (!oled_write_text(0, 3, line)) {
-    return false;
-  }
+  (void) snprintf(text, sizeof(text), "PITCH:%d", control->pitch_axis);
+  make_padded_line(pitch_line, OLED_PITCH_CHARS, text);
 
-  (void) snprintf(line, sizeof(line), "PITCH=%d", control->angles.pitch_deg);
-  if (!oled_write_text(0, 4, line)) {
-    return false;
-  }
+  return oled_write_cached_line(0, s_gesture_line, OLED_GESTURE_CHARS,
+                                gesture_line) &&
+         oled_write_cached_line(2, s_roll_line, OLED_ROLL_CHARS, roll_line) &&
+         oled_write_cached_line(3, s_pitch_line, OLED_PITCH_CHARS, pitch_line);
+}
 
-  (void) snprintf(line, sizeof(line), "RA=%d PA=%d",
-                  control->roll_axis,
-                  control->pitch_axis);
-  return oled_write_text(0, 6, line);
+bool oled_show_recenter(void) {
+  char gesture_line[OLED_GESTURE_CHARS + 1U];
+  char roll_line[OLED_ROLL_CHARS + 1U];
+  char pitch_line[OLED_PITCH_CHARS + 1U];
+
+  make_padded_line(gesture_line, OLED_GESTURE_CHARS, "RECENTER");
+  make_padded_line(roll_line, OLED_ROLL_CHARS, "OK");
+  make_padded_line(pitch_line, OLED_PITCH_CHARS, "");
+
+  return oled_write_cached_line(0, s_gesture_line, OLED_GESTURE_CHARS,
+                                gesture_line) &&
+         oled_write_cached_line(2, s_roll_line, OLED_ROLL_CHARS, roll_line) &&
+         oled_write_cached_line(3, s_pitch_line, OLED_PITCH_CHARS,
+                                pitch_line);
 }

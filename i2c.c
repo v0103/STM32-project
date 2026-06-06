@@ -7,7 +7,7 @@ enum {
 };
 
 static void i2c_delay(void) {
-  spin(1000);
+  spin(100);
 }
 
 static void scl_low(void) {

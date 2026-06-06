@@ -13,7 +13,7 @@ enum {
   BUTTON_PIN = PIN('A', 4),
   BUTTON_DEBOUNCE_MS = 30,
   BUTTON_LONG_PRESS_MS = 1000,
-  BUTTON_RECENTER_DEBOUNCE_MS = 200,
+  BUTTON_RECENTER_DEBOUNCE_MS = 500,
 };
 
 static void button_gpio_init(void) {
