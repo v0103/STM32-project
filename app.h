@@ -3,5 +3,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-bool app_init(uint32_t now);
+bool app_init(void);
+bool app_start_tasks(void);
 void app_update(uint32_t now);

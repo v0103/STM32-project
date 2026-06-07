@@ -63,11 +63,11 @@
 #define configMAX_SYSCALL_INTERRUPT_PRIORITY    \
   (configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))
 
-/*
- * Handler-name mapping is intentionally deferred until the scheduler replaces
- * the current bare-metal SysTick handler in the next step.
- */
-#define configCHECK_HANDLER_INSTALLATION        0
+/* Connect the Cortex-M3 FreeRTOS port to the STM32 vector table names. */
+#define vPortSVCHandler                         SVC_Handler
+#define xPortPendSVHandler                      PendSV_Handler
+#define xPortSysTickHandler                     SysTick_Handler
+#define configCHECK_HANDLER_INSTALLATION        1
 
 #define configASSERT(condition)                  \
   do {                                           \

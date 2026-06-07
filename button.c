@@ -10,7 +10,7 @@ static volatile bool irq_recenter_requested;
 static uint32_t last_recenter_at;
 
 enum {
-  BUTTON_PIN = PIN('A', 4),
+  BUTTON_PIN = PIN('A', 1),
   BUTTON_DEBOUNCE_MS = 30,
   BUTTON_LONG_PRESS_MS = 1000,
   BUTTON_RECENTER_DEBOUNCE_MS = 500,
@@ -73,15 +73,16 @@ void button_irq_init(void) {
   irq_recenter_requested = false;
   last_recenter_at = 0;
 
-  RCC->APB2ENR |= BIT(0);           // AFIO clock
-  AFIO->EXTICR[1] &= ~(0xFU << 0);  // EXTI4 source = PA4
+  RCC->APB2ENR |= BIT(0);            // AFIO clock
+  AFIO->EXTICR[0] &= ~(0xFU << 4);   // EXTI1 source = PA1
 
-  EXTI->IMR |= BIT(4);    // unmask EXTI line 4
-  EXTI->RTSR &= ~BIT(4);  // no rising-edge interrupt
-  EXTI->FTSR |= BIT(4);   // falling edge: button pressed
-  EXTI->PR = BIT(4);      // clear stale pending flag
+  EXTI->IMR |= BIT(1);     // unmask EXTI line 1
+  EXTI->RTSR &= ~BIT(1);   // no rising-edge interrupt
+  EXTI->FTSR |= BIT(1);    // falling edge: button pressed
+  EXTI->PR = BIT(1);       // clear stale pending flag
 
-  NVIC_EnableIRQ(EXTI4_IRQn);
+  NVIC_SetPriority(EXTI1_IRQn, 5U);
+  NVIC_EnableIRQ(EXTI1_IRQn);
 }
 
 bool button_take_recenter_request(uint32_t now) {
@@ -102,9 +103,9 @@ bool button_take_recenter_request(uint32_t now) {
   return true;
 }
 
-void EXTI4_IRQHandler(void) {
-  if ((EXTI->PR & BIT(4)) != 0) {
-    EXTI->PR = BIT(4);
+void EXTI1_IRQHandler(void) {
+  if ((EXTI->PR & BIT(1)) != 0) {
+    EXTI->PR = BIT(1);
     irq_recenter_requested = true;
   }
 }

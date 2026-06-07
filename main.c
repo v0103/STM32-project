@@ -1,26 +1,27 @@
 #include "hal.h"
 #include "app.h"
 
-static volatile uint32_t s_ticks; // volatile is important!!
-
-void SysTick_Handler(void) {
-  s_ticks++;
-}
+#include "FreeRTOS.h"
+#include "task.h"
 
 int main(void) {
-  systick_init(FREQ / 1000);  // Tick every 1 ms
   uart_init(USART1, 115200);
 
-  bool app_ready = app_init(s_ticks);
-  if (!app_ready) {
+  if (!app_init()) {
     printf("APP init failed\r\n");
-  }
-
-  for (;;) {
-    if (app_ready) {
-      app_update(s_ticks);
+    for (;;) {
     }
   }
 
-  return 0;
+  if (!app_start_tasks()) {
+    printf("APP task create failed\r\n");
+    for (;;) {
+    }
+  }
+
+  vTaskStartScheduler();
+
+  printf("Scheduler start failed\r\n");
+  for (;;) {
+  }
 }
