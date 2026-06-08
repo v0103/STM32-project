@@ -6,14 +6,12 @@ static bool stable_pressed;
 static bool long_reported;
 static uint32_t changed_at;
 static uint32_t pressed_at;
-static volatile bool irq_recenter_requested;
-static uint32_t last_recenter_at;
+static TaskHandle_t irq_notify_task;
 
 enum {
   BUTTON_PIN = PIN('A', 1),
   BUTTON_DEBOUNCE_MS = 30,
   BUTTON_LONG_PRESS_MS = 1000,
-  BUTTON_RECENTER_DEBOUNCE_MS = 500,
 };
 
 static void button_gpio_init(void) {
@@ -70,8 +68,7 @@ button_event_t button_poll(uint32_t now) {
 
 void button_irq_init(void) {
   button_gpio_init();
-  irq_recenter_requested = false;
-  last_recenter_at = 0;
+  irq_notify_task = NULL;
 
   RCC->APB2ENR |= BIT(0);            // AFIO clock
   AFIO->EXTICR[0] &= ~(0xFU << 4);   // EXTI1 source = PA1
@@ -85,27 +82,19 @@ void button_irq_init(void) {
   NVIC_EnableIRQ(EXTI1_IRQn);
 }
 
-bool button_take_recenter_request(uint32_t now) {
-  bool requested = irq_recenter_requested;
-
-  if (!requested) {
-    return false;
-  }
-
-  irq_recenter_requested = false;
-
-  if (last_recenter_at != 0 &&
-      (now - last_recenter_at) < BUTTON_RECENTER_DEBOUNCE_MS) {
-    return false;
-  }
-
-  last_recenter_at = now;
-  return true;
+void button_irq_set_notify_task(TaskHandle_t task) {
+  irq_notify_task = task;
 }
 
 void EXTI1_IRQHandler(void) {
   if ((EXTI->PR & BIT(1)) != 0) {
+    BaseType_t higher_priority_task_woken = pdFALSE;
+
     EXTI->PR = BIT(1);
-    irq_recenter_requested = true;
+
+    if (irq_notify_task != NULL) {
+      vTaskNotifyGiveFromISR(irq_notify_task, &higher_priority_task_woken);
+      portYIELD_FROM_ISR(higher_priority_task_woken);
+    }
   }
 }

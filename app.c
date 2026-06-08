@@ -18,15 +18,27 @@
 enum {
   APP_CONTROL_PERIOD_MS = 100,
   APP_OLED_PERIOD_MS = 500,
+  APP_UART_PERIOD_MS = 100,
+  APP_RECENTER_DEBOUNCE_MS = 500,
   APP_CONTROL_TASK_STACK_WORDS = 512,
   APP_OLED_TASK_STACK_WORDS = 384,
+  APP_UART_TASK_STACK_WORDS = 384,
   APP_CONTROL_TASK_PRIORITY = tskIDLE_PRIORITY + 2,
+  APP_UART_TASK_PRIORITY = tskIDLE_PRIORITY + 1,
   APP_OLED_TASK_PRIORITY = tskIDLE_PRIORITY + 1,
 };
+
+typedef struct {
+  uint32_t tick_ms;
+  gesture_control_t control;
+} app_control_sample_t;
 
 static bool s_oled_ready;
 static QueueHandle_t s_control_queue;
 static SemaphoreHandle_t s_i2c_mutex;
+static TaskHandle_t s_control_task;
+static TickType_t s_last_recenter_tick;
+static bool s_recenter_seen;
 
 static bool app_i2c_take(void) {
   return s_i2c_mutex != NULL &&
@@ -53,7 +65,7 @@ static void app_control_task(void *argument) {
 
 static void app_oled_task(void *argument) {
   TickType_t last_wake;
-  gesture_control_t control;
+  app_control_sample_t sample;
 
   (void) argument;
   last_wake = xTaskGetTickCount();
@@ -62,10 +74,26 @@ static void app_oled_task(void *argument) {
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(APP_OLED_PERIOD_MS));
 
     if (s_oled_ready &&
-        xQueuePeek(s_control_queue, &control, 0) == pdPASS &&
+        xQueuePeek(s_control_queue, &sample, 0) == pdPASS &&
         app_i2c_take()) {
-      (void) oled_show_control(&control);
+      (void) oled_show_control(&sample.control);
       app_i2c_give();
+    }
+  }
+}
+
+static void app_uart_task(void *argument) {
+  TickType_t last_wake;
+  app_control_sample_t sample;
+
+  (void) argument;
+  last_wake = xTaskGetTickCount();
+
+  for (;;) {
+    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(APP_UART_PERIOD_MS));
+
+    if (xQueuePeek(s_control_queue, &sample, 0) == pdPASS) {
+      control_packet_print(sample.tick_ms, &sample.control);
     }
   }
 }
@@ -75,8 +103,11 @@ bool app_init(void) {
   bool gyro_cal_ok;
   uint8_t pwr = 0;
 
-  s_control_queue = xQueueCreate(1, sizeof(gesture_control_t));
+  s_control_queue = xQueueCreate(1, sizeof(app_control_sample_t));
   s_i2c_mutex = xSemaphoreCreateMutex();
+  s_control_task = NULL;
+  s_last_recenter_tick = 0;
+  s_recenter_seen = false;
   if (s_control_queue == NULL || s_i2c_mutex == NULL) {
     printf("RTOS object create failed\r\n");
     return false;
@@ -108,6 +139,7 @@ bool app_init(void) {
 
 bool app_start_tasks(void) {
   BaseType_t control_created;
+  BaseType_t uart_created;
   BaseType_t oled_created = pdPASS;
 
   control_created = xTaskCreate(app_control_task,
@@ -115,7 +147,18 @@ bool app_start_tasks(void) {
                                 APP_CONTROL_TASK_STACK_WORDS,
                                 NULL,
                                 APP_CONTROL_TASK_PRIORITY,
-                                NULL);
+                                &s_control_task);
+
+  if (control_created == pdPASS) {
+    button_irq_set_notify_task(s_control_task);
+  }
+
+  uart_created = xTaskCreate(app_uart_task,
+                             "UART",
+                             APP_UART_TASK_STACK_WORDS,
+                             NULL,
+                             APP_UART_TASK_PRIORITY,
+                             NULL);
 
   if (s_oled_ready) {
     oled_created = xTaskCreate(app_oled_task,
@@ -126,14 +169,17 @@ bool app_start_tasks(void) {
                                NULL);
   }
 
-  return control_created == pdPASS && oled_created == pdPASS;
+  return control_created == pdPASS &&
+         uart_created == pdPASS &&
+         oled_created == pdPASS;
 }
 
 void app_update(uint32_t now) {
   mpu_motion_t motion;
   mpu_motion_scaled_t scaled;
-  gesture_control_t control;
+  app_control_sample_t sample;
   bool motion_ok;
+  bool recenter_requested;
 
   if (!app_i2c_take()) {
     printf("I2C mutex failed\r\n");
@@ -149,14 +195,22 @@ void app_update(uint32_t now) {
   }
 
   if (!mpu_scale_motion(&motion, &scaled) ||
-      !gesture_update_control(&scaled, &control)) {
+      !gesture_update_control(&scaled, &sample.control)) {
     printf("Control update failed\r\n");
     return;
   }
 
-  if (button_take_recenter_request(now)) {
+  sample.tick_ms = now;
+
+  recenter_requested = ulTaskNotifyTake(pdTRUE, 0) > 0U;
+  if (recenter_requested &&
+      (!s_recenter_seen ||
+       ((TickType_t) now - s_last_recenter_tick) >=
+         pdMS_TO_TICKS(APP_RECENTER_DEBOUNCE_MS))) {
+    s_recenter_seen = true;
+    s_last_recenter_tick = (TickType_t) now;
     gesture_recenter();
-    (void) gesture_update_control(&scaled, &control);
+    (void) gesture_update_control(&scaled, &sample.control);
 
     if (s_oled_ready && app_i2c_take()) {
       (void) oled_show_recenter();
@@ -166,9 +220,7 @@ void app_update(uint32_t now) {
     printf("RECENTER\r\n");
   }
 
-  control_packet_print(now, &control);
-
   if (s_control_queue != NULL) {
-    (void) xQueueOverwrite(s_control_queue, &control);
+    (void) xQueueOverwrite(s_control_queue, &sample);
   }
 }
