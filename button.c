@@ -89,7 +89,7 @@ void button_irq_set_notify_task(TaskHandle_t task) {
 void EXTI1_IRQHandler(void) {
   if ((EXTI->PR & BIT(1)) != 0) {
     BaseType_t higher_priority_task_woken = pdFALSE;
-
+    
     EXTI->PR = BIT(1);
 
     if (irq_notify_task != NULL) {

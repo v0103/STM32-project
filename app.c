@@ -16,9 +16,10 @@
 #include <stdio.h>
 
 enum {
-  APP_CONTROL_PERIOD_MS = 100,
+  APP_CONTROL_PERIOD_MS = 50,
   APP_OLED_PERIOD_MS = 500,
   APP_UART_PERIOD_MS = 100,
+  APP_STACK_REPORT_PERIOD_MS = 5000,
   APP_RECENTER_DEBOUNCE_MS = 500,
   APP_CONTROL_TASK_STACK_WORDS = 512,
   APP_OLED_TASK_STACK_WORDS = 384,
@@ -37,6 +38,8 @@ static bool s_oled_ready;
 static QueueHandle_t s_control_queue;
 static SemaphoreHandle_t s_i2c_mutex;
 static TaskHandle_t s_control_task;
+static TaskHandle_t s_oled_task;
+static TaskHandle_t s_uart_task;
 static TickType_t s_last_recenter_tick;
 static bool s_recenter_seen;
 
@@ -49,6 +52,29 @@ static void app_i2c_give(void) {
   if (s_i2c_mutex != NULL) {
     (void) xSemaphoreGive(s_i2c_mutex);
   }
+}
+
+static void app_print_stack_report(void) {
+  UBaseType_t control_words = 0;
+  UBaseType_t oled_words = 0;
+  UBaseType_t uart_words = 0;
+
+  if (s_control_task != NULL) {
+    control_words = uxTaskGetStackHighWaterMark(s_control_task);
+  }
+
+  if (s_oled_task != NULL) {
+    oled_words = uxTaskGetStackHighWaterMark(s_oled_task);
+  }
+
+  if (s_uart_task != NULL) {
+    uart_words = uxTaskGetStackHighWaterMark(s_uart_task);
+  }
+
+  printf("STACK,CONTROL=%lu,OLED=%lu,UART=%lu\r\n",
+         (unsigned long) control_words,
+         (unsigned long) oled_words,
+         (unsigned long) uart_words);
 }
 
 static void app_control_task(void *argument) {
@@ -64,14 +90,22 @@ static void app_control_task(void *argument) {
 }
 
 static void app_oled_task(void *argument) {
-  TickType_t last_wake;
+  uint32_t notification_count;
   app_control_sample_t sample;
 
   (void) argument;
-  last_wake = xTaskGetTickCount();
 
   for (;;) {
-    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(APP_OLED_PERIOD_MS));
+    notification_count = ulTaskNotifyTake(pdTRUE,
+                                          pdMS_TO_TICKS(APP_OLED_PERIOD_MS));
+
+    if (notification_count > 0U) {
+      if (s_oled_ready && app_i2c_take()) {
+        (void) oled_show_recenter();
+        app_i2c_give();
+      }
+      continue;
+    }
 
     if (s_oled_ready &&
         xQueuePeek(s_control_queue, &sample, 0) == pdPASS &&
@@ -84,16 +118,27 @@ static void app_oled_task(void *argument) {
 
 static void app_uart_task(void *argument) {
   TickType_t last_wake;
+  TickType_t last_stack_report;
   app_control_sample_t sample;
 
   (void) argument;
   last_wake = xTaskGetTickCount();
+  last_stack_report = last_wake;
 
   for (;;) {
+    TickType_t now;
+
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(APP_UART_PERIOD_MS));
+    now = xTaskGetTickCount();
 
     if (xQueuePeek(s_control_queue, &sample, 0) == pdPASS) {
       control_packet_print(sample.tick_ms, &sample.control);
+    }
+
+    if ((now - last_stack_report) >=
+        pdMS_TO_TICKS(APP_STACK_REPORT_PERIOD_MS)) {
+      last_stack_report = now;
+      app_print_stack_report();
     }
   }
 }
@@ -106,6 +151,8 @@ bool app_init(void) {
   s_control_queue = xQueueCreate(1, sizeof(app_control_sample_t));
   s_i2c_mutex = xSemaphoreCreateMutex();
   s_control_task = NULL;
+  s_oled_task = NULL;
+  s_uart_task = NULL;
   s_last_recenter_tick = 0;
   s_recenter_seen = false;
   if (s_control_queue == NULL || s_i2c_mutex == NULL) {
@@ -158,7 +205,7 @@ bool app_start_tasks(void) {
                              APP_UART_TASK_STACK_WORDS,
                              NULL,
                              APP_UART_TASK_PRIORITY,
-                             NULL);
+                             &s_uart_task);
 
   if (s_oled_ready) {
     oled_created = xTaskCreate(app_oled_task,
@@ -166,7 +213,7 @@ bool app_start_tasks(void) {
                                APP_OLED_TASK_STACK_WORDS,
                                NULL,
                                APP_OLED_TASK_PRIORITY,
-                               NULL);
+                               &s_oled_task);
   }
 
   return control_created == pdPASS &&
@@ -212,9 +259,8 @@ void app_update(uint32_t now) {
     gesture_recenter();
     (void) gesture_update_control(&scaled, &sample.control);
 
-    if (s_oled_ready && app_i2c_take()) {
-      (void) oled_show_recenter();
-      app_i2c_give();
+    if (s_oled_task != NULL) {
+      (void) xTaskNotifyGive(s_oled_task);
     }
 
     printf("RECENTER\r\n");
